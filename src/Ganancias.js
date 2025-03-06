@@ -1,29 +1,40 @@
 import React, { useState, useEffect } from "react";
 import { TextField, Box, Typography, Button } from "@mui/material";
-import { ref, get, set, push, update } from "firebase/database";
+import { ref, get, push } from "firebase/database";
 import { db } from "./firebaseConfig";
 
 const Ganancias = () => {
     const [gananciaDiaria, setGananciaDiaria] = useState("");
     const [totalGanancias, setTotalGanancias] = useState(0);
+    const [totalGananciasPrevias, setTotalGananciasPrevias] = useState(0);
+    const [gananciasPorDia, setGananciasPorDia] = useState([]);
+    const [diasTrabajados, setDiasTrabajados] = useState(0);
+    const [diasTrabajadosPrevios, setDiasTrabajadosPrevios] = useState(0);
     const [mesActual, setMesActual] = useState(new Date().getMonth());
-    const [fechaUltimaGanancia, setFechaUltimaGanancia] = useState(null);
 
     useEffect(() => {
         cargarGanancias();
     }, []);
 
     const cargarGanancias = async () => {
-        const gananciasRef = ref(db, "ganancias/actual");
+        const gananciasRef = ref(db, "ganancias/historial");
         const snapshot = await get(gananciasRef);
         if (snapshot.exists()) {
             const data = snapshot.val();
-            if (data.mes !== mesActual) {
-                resetearGanancias(data.total);
-            } else {
-                setTotalGanancias(data.total || 0);
-                setFechaUltimaGanancia(data.fechaUltimaGanancia || null);
-            }
+
+            const mesFiltrado = Object.values(data).filter(
+                (g) => new Date(g.fechaGanancia).getMonth() === mesActual
+            );
+            const mesAnterior = Object.values(data).filter(
+                (g) => new Date(g.fechaGanancia).getMonth() === (mesActual - 1)
+            );
+
+            setGananciasPorDia(mesFiltrado);
+            setTotalGanancias(mesFiltrado.reduce((sum, g) => sum + g.total, 0));
+            setTotalGananciasPrevias(mesAnterior.reduce((sum, g) => sum + g.total, 0));
+
+            setDiasTrabajados(new Set(mesFiltrado.map(g => new Date(g.fechaGanancia).toLocaleDateString())).size);
+            setDiasTrabajadosPrevios(new Set(mesAnterior.map(g => new Date(g.fechaGanancia).toLocaleDateString())).size);
         }
     };
 
@@ -33,70 +44,47 @@ const Ganancias = () => {
             return;
         }
 
-        const nuevaGanancia = totalGanancias + parseFloat(gananciaDiaria);
-        setTotalGanancias(nuevaGanancia);
+        const nuevaGanancia = parseFloat(gananciaDiaria);
         setGananciaDiaria("");
+        const fechaActual = new Date().toISOString();
 
-        const fechaActual = new Date().toISOString(); // Obtener la fecha actual
-
-        // Guardar la ganancia y la fecha en "ganancias/actual"
-        await update(ref(db, "ganancias/actual"), {
+        await push(ref(db, "ganancias/historial"), {
+            mes: mesActual,
             total: nuevaGanancia,
-            mes: mesActual,
-            fechaUltimaGanancia: fechaActual // Guardar la fecha de la última ganancia
+            fechaGanancia: fechaActual
         });
 
-        setFechaUltimaGanancia(fechaActual); // Actualizar el estado con la fecha
-
-        // También puedes agregar la fecha y la ganancia a un historial
-        const historialRef = ref(db, "ganancias/historial");
-        await push(historialRef, {
-            mes: mesActual,
-            total: parseFloat(gananciaDiaria),
-            fechaGanancia: fechaActual // Guardar la fecha de la ganancia
-        });
+        cargarGanancias();
     };
 
-    const resetearGanancias = async (totalAnterior) => {
-        const historialRef = ref(db, "ganancias/historial");
-        const fechaActual = new Date().toISOString(); // Obtener la fecha al reiniciar
-
-        // Agregar el total anterior al historial
-        await push(historialRef, {
-            mes: mesActual,
-            total: totalAnterior,
-            fechaGanancia: fechaActual // Guardar la fecha de reinicio
-        });
-
-        // Reiniciar las ganancias para el mes actual
-        await set(ref(db, "ganancias/actual"), { total: 0, mes: mesActual });
-        setTotalGanancias(0);
-        setFechaUltimaGanancia(null); // Limpiar la fecha de la última ganancia al reiniciar
-    };
-
-    // Función para obtener el nombre del mes
     const obtenerNombreMes = (mes) => {
         const nombresMeses = [
             "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
             "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"
         ];
-        return nombresMeses[mes];
+        return nombresMeses[mes] || "Desconocido";
     };
 
     return (
-        <Box sx={{ maxWidth: "100%", margin: "auto", padding: 3, backgroundColor: "#f5f5f5", borderRadius: 7, boxShadow: 2 }}>
-            <Typography color="success" variant="h5" gutterBottom textAlign="center" mt={3} >
-                Control de Ganancias - {obtenerNombreMes(mesActual)}
+        <Box sx={{ maxWidth: "100%", margin: "auto", padding: 3, backgroundColor: "#fffde2", borderRadius: 7, boxShadow: 2 }}>
+            <Typography color="success" variant="h5" gutterBottom textAlign="center" mt={3}>
+                Control de Ganancias <Typography color="lightgreen" fontSize='2rem'>{obtenerNombreMes(mesActual)}</Typography>
             </Typography>
             <Typography variant="h6" textAlign="center" mt={3}>
-                Total de ganancias del mes: ${totalGanancias}
+                Total de ganancias de {obtenerNombreMes(mesActual)}:<Typography fontWeight='bold' fontSize='4rem' color="orange">${totalGanancias}</Typography>
             </Typography>
-            {fechaUltimaGanancia && (
-                <Typography variant="body1" textAlign="center" mt={2}>
-                    Última ganancia ingresada el: {new Date(fechaUltimaGanancia).toLocaleString()}
-                </Typography>
-            )}
-            <Box sx={{ textAlign: "center", marginTop: 3, display:'flex', justifyContent:'center' }}>
+            <Typography variant="h6" textAlign="center" mt={2}>
+                Días trabajados: <Typography fontWeight='bold' fontSize='2rem' color="blue">{diasTrabajados}</Typography>
+            </Typography>
+
+            <Typography variant="h6" textAlign="center" mt={4} color="gray">
+                Total de ganancias de {obtenerNombreMes(mesActual - 1)}: <Typography fontWeight='bold' fontSize='3rem' color="gray">${totalGananciasPrevias}</Typography>
+            </Typography>
+            <Typography variant="h6" textAlign="center" mt={2} color="gray">
+                Días trabajados en {obtenerNombreMes(mesActual - 1)}: <Typography fontWeight='bold' fontSize='2rem' color="gray">{diasTrabajadosPrevios}</Typography>
+            </Typography>
+
+            <Box sx={{ textAlign: "center", marginTop: 3, display: 'flex', justifyContent: 'center' }}>
                 <TextField
                     label="Ingresar ganancia diaria"
                     value={gananciaDiaria}
@@ -104,13 +92,24 @@ const Ganancias = () => {
                     type="number"
                     sx={{ marginRight: 2 }}
                 />
-                <Button variant="contained" color="secondary" onClick={agregarGanancia}>
+                <Button variant="outlined" color="primary" sx={{ borderRadius: 3, color: 'red' }} onClick={agregarGanancia}>
                     Agregar Ganancia
                 </Button>
+            </Box>
+            <Typography variant="h6" sx={{ mt: 4, textAlign: "center" }}>Ganancias Diarias</Typography>
+            <Box sx={{ mt: 4, borderRadius: 4, display: 'flex', justifyContent: 'center', margin: 2, alignContent: 'center', flexWrap: 'wrap', boxShadow: '6' }}>
+                {gananciasPorDia.length === 0 ? (
+                    <Typography textAlign="center">No hay ganancias registradas este mes.</Typography>
+                ) : (
+                    gananciasPorDia.map((g, index) => (
+                        <Box key={index} sx={{ margin: 3, p: 2, mt: 4, border: "1px solid #ccc", borderRadius: 2, backgroundColor: 'lightgreen', display: 'flex', justifyItems: 'center', justifyContent: 'center' }}>
+                            <Typography>Fecha: {new Date(g.fechaGanancia).toLocaleDateString()} - <Typography fontWeight='bold'>${g.total}</Typography></Typography>
+                        </Box>
+                    ))
+                )}
             </Box>
         </Box>
     );
 };
 
 export default Ganancias;
-
